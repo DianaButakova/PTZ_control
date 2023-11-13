@@ -1,5 +1,6 @@
 
 from time import sleep
+import math
 import sys
 from onvif import ONVIFCamera
 import zeep
@@ -7,14 +8,15 @@ import zeep
 #speed
 XMAX = 1
 XMIN = -1
-YMAX = 1
-YMIN = -1
+# YMAX = 1
+# YMIN = -1
 
 
 max_speed_onXaxis=18.85
 max_speed_onYaxis=10
 
 func_of_presetpoint=1
+
 
 
 def get_coordinates():
@@ -30,7 +32,7 @@ def get_coordinates():
         sys.exit(1)
 
 def calculations(final_point_Xaxis, final_point_Yaxis, X_pos_current, Y_pos_current):
-    #Данная функция для движения отдельно по Х и У
+    #Данная функция для движения вместе по Х и У
 
     delta_X=abs(final_point_Xaxis-X_pos_current)
     delta_Y=abs(final_point_Yaxis-Y_pos_current)
@@ -42,30 +44,18 @@ def calculations(final_point_Xaxis, final_point_Yaxis, X_pos_current, Y_pos_curr
 
     delta_displX1= abs(delta_X-Xaxis_first_displacement_TIME*max_speed_onXaxis)
     Xaxis_sec_displacement_TIME=delta_displX1//max_speed_onXaxis
+    # начало такое же как и в  том коде
+    Xaxis_total_TIME=Xaxis_sec_displacement_TIME+Xaxis_first_displacement_TIME
+    #тоталмвремя для нахождения скорости по У
+    displacement_Xaxis=max_speed_onXaxis*Xaxis_total_TIME
 
-    displacement_Xaxis=max_speed_onXaxis*Xaxis_first_displacement_TIME+max_speed_onXaxis*Xaxis_sec_displacement_TIME/10 
+    Speed_on_Yaxis=round(delta_Y/Xaxis_total_TIME, 1)
 
+    displacement_Yaxis=Xaxis_total_TIME*Speed_on_Yaxis
+    
+    #тут логика в том, что камера на максимальной скорости идет по Х, но в это же время со скоростью Speed_on_Yaxis идет по У. и в итоге достигает назначенной точки
+    return Xaxis_first_displacement_TIME,Xaxis_sec_displacement_TIME, Speed_on_Yaxis, displacement_Xaxis, displacement_Yaxis
 
-
-    Yaxis_first_displacement_TIME=delta_Y//max_speed_onYaxis
-
-    if delta_Y-max_speed_onYaxis*Yaxis_first_displacement_TIME >= max_speed_onYaxis/2:
-        Yaxis_first_displacement_TIME+=1
-
-    delta_displY1= abs(delta_Y-Yaxis_first_displacement_TIME*max_speed_onYaxis)
-    Yaxis_sec_displacement_TIME=delta_displY1//max_speed_onYaxis
-
-    displacement_Yaxis=max_speed_onYaxis*Yaxis_first_displacement_TIME+max_speed_onYaxis*Yaxis_sec_displacement_TIME/10
-
-
-
-    print(init_point_Xaxis, ' ',final_point_Xaxis,' ', delta_X)
-    print(Xaxis_first_displacement_TIME, ' ',delta_displX1,' ', Xaxis_sec_displacement_TIME)
-
-    print(init_point_Yaxis, ' ',final_point_Yaxis,' ', delta_Y)
-    print(Yaxis_first_displacement_TIME, ' ',delta_displY1,' ', Yaxis_sec_displacement_TIME)
-
-    return Xaxis_first_displacement_TIME, Yaxis_first_displacement_TIME, Xaxis_sec_displacement_TIME, Yaxis_sec_displacement_TIME, displacement_Xaxis, displacement_Yaxis
 
 
 def zeep_pythonvalue(self, xmlvalue):
@@ -83,32 +73,29 @@ def perform_move(ptz, request, timeout):
     ptz.Stop({'ProfileToken': request.ProfileToken})
 
 
-def move_up(ptz, request, timeout):
-    print('move up...')
-    request.Velocity.PanTilt.x = 0
-    request.Velocity.PanTilt.y = YMIN
+
+def move_up_right(ptz, request, timeout,Y_speed):
+    print('move up right...')
+    request.Velocity.PanTilt.x = XMIN #min
+    request.Velocity.PanTilt.y = Y_speed #мин
     perform_move(ptz, request, timeout)
 
-
-def move_down(ptz, request, timeout):
-    print('move down...')
-    request.Velocity.PanTilt.x = 0
-    request.Velocity.PanTilt.y = YMAX
-    perform_move(ptz, request, timeout)
-
-
-def move_right(ptz, request, timeout):
-    print('move right...')
-    request.Velocity.PanTilt.x = XMIN
-    request.Velocity.PanTilt.y = 0
-
-    perform_move(ptz, request, timeout)
-
-
-def move_left(ptz, request, timeout):
-    print('move left...')
+def move_up_left(ptz, request,timeout, Y_speed):
+    print('move up left...')
     request.Velocity.PanTilt.x = XMAX
-    request.Velocity.PanTilt.y = 0
+    request.Velocity.PanTilt.y = Y_speed #YMIN
+    perform_move(ptz, request, timeout)
+
+def move_down_right(ptz, request, timeout,Y_speed):
+    print('move down right...')
+    request.Velocity.PanTilt.x = XMIN
+    request.Velocity.PanTilt.y = Y_speed #YMAX
+    perform_move(ptz, request, timeout)
+
+def move_down_left(ptz, request, timeout,Y_speed):
+    print('move down left...')
+    request.Velocity.PanTilt.x = XMAX
+    request.Velocity.PanTilt.y = Y_speed #YMAX
     perform_move(ptz, request, timeout)
     
 
@@ -169,22 +156,25 @@ def continuous_move(final_point_Xaxis, final_point_Yaxis, Z_time, init_point_Xax
     #displacement_Xaxis, displacement_Yaxis  это настоящее движение. Допустим мы задали 90 градусов. Скорость камеры не позволит добраться прям до этой точки.Камера двинется на 4 секунды, 
     # то есть на 74 градуса, потом докрутит еще некоторое время. В итоге получается не 90 полных градуса, [90-1.8, 90] градуса
     #погрешность максимум 1.8 градуса. 
-    Xaxis_first_displacement_TIME, Yaxis_first_displacement_TIME, Xaxis_sec_displacement_TIME, Yaxis_sec_displacement_TIME, displacement_Xaxis, displacement_Yaxis = calculations(final_point_Xaxis, final_point_Yaxis, init_point_Xaxis, init_point_Yaxis)
+    Xaxis_first_displacement_TIME,Xaxis_sec_displacement_TIME, Speed_on_Yaxis, displacement_Xaxis, displacement_Yaxis = calculations(final_point_Xaxis, final_point_Yaxis, init_point_Xaxis, init_point_Yaxis)
 
-    if final_point_Xaxis>=0:
-        move_right(ptz, request,Xaxis_first_displacement_TIME )   
-        move_right(ptz, request, Xaxis_sec_displacement_TIME)   
-    else:    
-        move_left(ptz, request, Xaxis_first_displacement_TIME)
-        move_left(ptz, request, Xaxis_sec_displacement_TIME)
-        
+    if final_point_Xaxis>=init_point_Xaxis and final_point_Xaxis>=init_point_Yaxis:
+        move_up_right(ptz, request,Xaxis_first_displacement_TIME,-Speed_on_Yaxis )   
+        move_up_right(ptz, request,Xaxis_sec_displacement_TIME,-Speed_on_Yaxis )  
 
-    if final_point_Yaxis>=0:            
-        move_up(ptz, request,Yaxis_first_displacement_TIME)    
-        move_up(ptz, request, Yaxis_sec_displacement_TIME)  
-    else:
-        move_down(ptz, request, Yaxis_first_displacement_TIME)
-        move_down(ptz, request,Yaxis_sec_displacement_TIME)
+    elif final_point_Xaxis<=init_point_Xaxis and final_point_Xaxis>=init_point_Yaxis:    
+        move_up_left(ptz, request, Xaxis_first_displacement_TIME,-Speed_on_Yaxis)
+        move_up_left(ptz, request, Xaxis_sec_displacement_TIME,-Speed_on_Yaxis)
+
+    elif final_point_Xaxis<=init_point_Xaxis and final_point_Xaxis<=init_point_Yaxis:    
+        move_down_left(ptz, request, Xaxis_first_displacement_TIME,Speed_on_Yaxis)
+        move_down_left(ptz, request, Xaxis_sec_displacement_TIME,Speed_on_Yaxis)  
+          
+    elif final_point_Xaxis>=init_point_Xaxis and final_point_Xaxis<=init_point_Yaxis:    
+        move_down_right(ptz, request, Xaxis_first_displacement_TIME,Speed_on_Yaxis)
+        move_down_right(ptz, request, Xaxis_sec_displacement_TIME,Speed_on_Yaxis)  
+
+    
 
     if Z_time>0:
         zoom_up(ptz,request,Z_time)
@@ -202,4 +192,3 @@ if __name__ == '__main__':
     init_point_Xaxis, init_point_Yaxis = 0, 0  
     final_point_Xaxis, final_point_Yaxis, Z_time = get_coordinates()
     init_point_Xaxis, init_point_Yaxis = continuous_move(final_point_Xaxis, final_point_Yaxis, Z_time, init_point_Xaxis, init_point_Yaxis)
-
